@@ -299,7 +299,7 @@ class TranscriptEncoder(nn.Module):
             ]
         )
 
-    def forward(self, x, score_mod, block_mask):
+    def forward(self, x, score_mod, block_mask, output_attentions=False):
         """
         Forward pass of the TranscriptEncoder.
 
