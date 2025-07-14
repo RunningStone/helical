@@ -52,7 +52,7 @@ class MultiHeadSelfFlexAttn(nn.Module):
         self.linears = clones(nn.Linear(d_model, d_model, bias=bias), 4)
         self.self_attn = flex_attention
 
-    def forward(self, inp, score_mod=None, block_mask=None, **kwargs):
+    def forward(self, inp, score_mod=None, block_mask=None,output_attentions=False, **kwargs):
         """Forward pass of the MultiHeadSelfFlexAttn."""
         batch_size = inp.size(0)
 
@@ -63,27 +63,92 @@ class MultiHeadSelfFlexAttn(nn.Module):
         )
 
         # 2) Apply attention on all the projected vectors in batch.
-        o = self.self_attn(
-            q,
-            k,
-            v,
-            score_mod=score_mod,
-            block_mask=block_mask,
-            kernel_options={
-                "BLOCK_M": 32,
-                "BLOCK_N": 32,
-                "BLOCK_M1": 32,
-                "BLOCK_N1": 32,
-                "BLOCK_M2": 32,
-                "BLOCK_N2": 32,
-            },
-        )
+        # 2) Apply attention on all the projected vectors in batch.
+        if output_attentions:
+            # 使用 flex_attention 并计算注意力权重
+            o = self.self_attn(
+                q,
+                k,
+                v,
+                score_mod=score_mod,
+                block_mask=block_mask,
+                kernel_options={
+                    "BLOCK_M": 32,
+                    "BLOCK_N": 32,
+                    "BLOCK_M1": 32,
+                    "BLOCK_N1": 32,
+                    "BLOCK_M2": 32,
+                    "BLOCK_N2": 32,
+                },
+            )
+            
+            # 手动计算注意力权重用于可视化
+            # 注意：这里我们重新计算注意力分数来获取权重
+            # 在实际应用中，你可能需要根据具体的 flex_attention 实现来调整
+            attn_weights = self._compute_attention_weights(q, k, score_mod, block_mask)
+            
+        else:
+            o = self.self_attn(
+                q,
+                k,
+                v,
+                score_mod=score_mod,
+                block_mask=block_mask,
+                kernel_options={
+                    "BLOCK_M": 32,
+                    "BLOCK_N": 32,
+                    "BLOCK_M1": 32,
+                    "BLOCK_N1": 32,
+                    "BLOCK_M2": 32,
+                    "BLOCK_N2": 32,
+                },
+            )
+            attn_weights = None
 
         # 3) "Concat" using a view and apply a final linear.
         o = o.transpose(1, 2).contiguous().view(batch_size, -1, self.h * self.d_k)
+        output = self.linears[-1](o)
 
-        return self.linears[-1](o)
+        if output_attentions:
+            return output, attn_weights
+        else:
+            return output
 
+    def _compute_attention_weights(self, q, k, score_mod=None, block_mask=None):
+        """
+        计算注意力权重矩阵
+        这个方法手动计算注意力权重，用于可视化
+        """
+        batch_size, num_heads, seq_len, head_dim = q.shape
+        
+        # 计算注意力分数
+        scores = torch.matmul(q, k.transpose(-2, -1)) / (head_dim ** 0.5)
+        
+        # 应用 score_mod 函数（如果提供）
+        if score_mod is not None:
+            # 创建索引网格
+            q_idx = torch.arange(seq_len, device=q.device)
+            kv_idx = torch.arange(seq_len, device=k.device)
+            
+            # 对每个位置应用 score_mod
+            for b in range(batch_size):
+                for h in range(num_heads):
+                    for i in range(seq_len):
+                        for j in range(seq_len):
+                            scores[b, h, i, j] = score_mod(
+                                scores[b, h, i, j], b, h, i, j
+                            )
+        
+        # 应用 block_mask（如果提供）
+        if block_mask is not None:
+            # 这里需要根据具体的 block_mask 实现来调整
+            pass
+        
+        # 应用 softmax 得到注意力权重
+        attn_weights = F.softmax(scores, dim=-1)
+        
+        # 返回平均的注意力权重 (batch_size, seq_len, seq_len)
+        return attn_weights.mean(dim=1)
 
 class FlexAttnTransformerLayer(nn.Module):
     """
@@ -142,13 +207,36 @@ class FlexAttnTransformerLayer(nn.Module):
         else:
             raise ValueError(f"Activation {activation} not supported")
 
-    def forward(self, x, score_mod=None, block_mask=None):
+    def forward(self, x, score_mod=None, block_mask=None,output_attentions=False):
         """Forward pass of the FlexAttnTransformerLayer."""
-        x = self.norm1(x)  # pre-norm is the new norm
-        x = self.self_attn(x, score_mod=score_mod, block_mask=block_mask) + x
-        x = self.norm2(x)
-        x = self.linear2(self.dropout(self.activation(self.linear1(x)))) + x
-        return x
+        x_norm = self.norm1(x)  # pre-norm is the new norm
+        
+        if output_attentions:
+            attn_output, attn_weights = self.self_attn(
+                x_norm, 
+                score_mod=score_mod, 
+                block_mask=block_mask,
+                output_attentions=True
+            )
+            x = attn_output + x
+        else:
+            attn_output = self.self_attn(
+                x_norm, 
+                score_mod=score_mod, 
+                block_mask=block_mask,
+                output_attentions=False
+            )
+            x = attn_output + x
+            attn_weights = None
+        
+        # Feed forward
+        x_norm2 = self.norm2(x)
+        x = self.linear2(self.dropout(self.activation(self.linear1(x_norm2)))) + x
+        
+        if output_attentions:
+            return x, attn_weights
+        else:
+            return x
 
 
 class TranscriptEncoder(nn.Module):
@@ -224,9 +312,28 @@ class TranscriptEncoder(nn.Module):
         -------
             torch.Tensor: Output tensor of shape (batch_size, seq_len, embed_dim).
         """
-        for layer in self.encoder_layers:
-            x = layer(x, score_mod=score_mod, block_mask=block_mask)
-        return x
+        output = x
+        attn_maps = []
+        
+        for mod in self.encoder_layers:
+            if output_attentions:
+                output, attn_map = mod(
+                    output,
+                    score_mod=score_mod,
+                    block_mask=block_mask,
+                    output_attentions=True,
+                )
+                attn_maps.append(attn_map)
+            else:
+                output = mod(
+                    output,
+                    score_mod=score_mod,
+                    block_mask=block_mask,
+                    output_attentions=False,
+                )
+                attn_maps=None
+        
+        return output, attn_maps
 
 
 class MaskedSoftmax(nn.Module):

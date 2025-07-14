@@ -268,6 +268,7 @@ class Transcriptformer(nn.Module):
         self,
         batch: BatchData,
         embed: bool = False,
+        output_attentions: bool = False,
         **kwargs,
     ) -> dict:
         """Forward pass of the model.
@@ -339,10 +340,11 @@ class Transcriptformer(nn.Module):
         score_mod = self._score_mod_factory(log_counts, emb_mode=embed)
 
         # Apply the transformer encoder
-        transformer_output = self.transformer_encoder(
+        transformer_output, attn_maps = self.transformer_encoder(
             x=right_shifted_gene_embeddings,
             score_mod=score_mod,
             block_mask=block_mask,
+            output_attentions=output_attentions,
         )
 
         # Extract the auxiliary features from the output
@@ -359,6 +361,8 @@ class Transcriptformer(nn.Module):
             gene_output = transformer_output
 
         result = {}
+        if output_attentions:
+            result["attn_maps"] = attn_maps
 
         if embed:
             result["cell_embeddings"] = (
@@ -406,7 +410,7 @@ class Transcriptformer(nn.Module):
         return result
 
     @torch.no_grad()
-    def inference(self, batch: BatchData):
+    def inference(self, batch: BatchData, output_attentions: bool = False):
         """Run inference on a batch of data.
 
         Args:
@@ -435,7 +439,8 @@ class Transcriptformer(nn.Module):
             }
         )
 
-        transformer_output = self.forward(batch=resized_batch, embed=True)
+        transformer_output = self.forward(batch=resized_batch, embed=True, 
+                                            output_attentions=output_attentions)
 
         if pad_rows > 0:
             # Remove the last pad_rows rows from the batch
@@ -466,6 +471,8 @@ class Transcriptformer(nn.Module):
             transformer_output["gene_llh"] = gene_llh
 
         results = {}
+        if output_attentions:
+            results["attn_maps"] = transformer_output["attn_maps"]
         results["obs"] = batch.obs
         results.update(
             {key: transformer_output[key] for key in self.inference_config.output_keys}

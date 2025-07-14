@@ -202,7 +202,7 @@ class TranscriptFormer(HelicalRNAModel):
         dataset = AnnDataset(data_files, **data_kwargs)
         return dataset
 
-    def get_embeddings(self, dataset: AnnDataset) -> torch.Tensor:
+    def get_embeddings(self, dataset: AnnDataset, output_attentions: bool = False) -> torch.Tensor:
         """
         Get the embeddings for the dataset.
 
@@ -237,7 +237,7 @@ class TranscriptFormer(HelicalRNAModel):
         self.model.to(self.config.model.inference_config.device)
         with torch.no_grad():
             for batch in progress_bar:
-                output_batch = self.model.inference(batch)
+                output_batch = self.model.inference(batch, output_attentions=output_attentions)
                 output.append(output_batch)
 
         logger.info("Combining predictions")
