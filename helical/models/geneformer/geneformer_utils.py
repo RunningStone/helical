@@ -155,6 +155,7 @@ def get_embs(
     device,
     silent=False,
     output_attentions=False,
+    fixed_mini_batch_size=0,
 ):
     model_input_size = get_model_input_size(model)
     total_batch_length = len(filtered_input_data)
@@ -171,7 +172,7 @@ def get_embs(
 
         minibatch = filtered_input_data.select([i for i in range(i, max_range)])
 
-        max_len = int(max(minibatch["length"]))
+        max_len = int(max(minibatch["length"])) if fixed_mini_batch_size==0 else fixed_mini_batch_size
         minibatch.set_format(type="torch", device=device)
 
         input_data_minibatch = minibatch["input_ids"]
