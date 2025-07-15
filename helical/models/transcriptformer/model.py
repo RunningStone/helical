@@ -226,7 +226,9 @@ class TranscriptFormer(HelicalRNAModel):
             pin_memory=True,
             collate_fn=dataset.collate_fn,
         )
-
+        logger.info(f"Using device: {self.config.model.inference_config.device}")
+        self.model.to(self.config.model.inference_config.device)
+        
         output = []
         progress_bar = tqdm(
             dataloader,
@@ -234,8 +236,7 @@ class TranscriptFormer(HelicalRNAModel):
             total=len(dataloader),
             unit="batch",
         )
-        logger.info(f"Using device: {self.config.model.inference_config.device}")
-        self.model.to(self.config.model.inference_config.device)
+
         with torch.no_grad():
             for batch in progress_bar:
                 output_batch = self.model.inference(batch, output_attentions=output_attentions)
