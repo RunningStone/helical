@@ -8,6 +8,7 @@
   </a></p>
 </div>
 
+# Modified version of Helical (v1.3.0) to fit my requests
 
 # What is Helical ?
 
