@@ -155,12 +155,16 @@ def get_embs(
     device,
     silent=False,
     output_attentions=False,
-    fixed_mini_batch_size=0,
+    force_same_length=0,
 ):
+    import torch
+    from tqdm.auto import trange
+    from helical.models.geneformer.geneformer_utils import get_model_input_size, _check_for_expected_special_tokens, pad_tensor_list, gen_attention_mask, _compute_embeddings_depending_on_mode
     model_input_size = get_model_input_size(model)
     total_batch_length = len(filtered_input_data)
     embs_list = []
     attn_list = []
+    input_ids_list = []
 
     _check_for_expected_special_tokens(
         filtered_input_data, emb_mode, cls_present, eos_present, gene_token_dict
@@ -171,11 +175,16 @@ def get_embs(
         max_range = min(i + forward_batch_size, total_batch_length)
 
         minibatch = filtered_input_data.select([i for i in range(i, max_range)])
-
-        max_len = int(max(minibatch["length"])) if fixed_mini_batch_size==0 else fixed_mini_batch_size
         minibatch.set_format(type="torch", device=device)
 
         input_data_minibatch = minibatch["input_ids"]
+
+        # have a fixed length for all the minibatches if needed
+        max_len = int(max(minibatch["length"])) if force_same_length==0 else force_same_length
+        if max_len < int(max(minibatch["length"])):
+            # if longer than needed, truncate
+            input_data_minibatch  = input_data_minibatch[:, :max_len]
+        # pad to the max length
         input_data_minibatch = pad_tensor_list(
             input_data_minibatch, max_len, pad_token_id, model_input_size
         ).to(device)
@@ -184,7 +193,7 @@ def get_embs(
         with torch.no_grad():
             outputs = model(
                 input_ids=input_data_minibatch,
-                attention_mask=gen_attention_mask(minibatch),
+                attention_mask=gen_attention_mask(minibatch, max_len),
                 output_attentions=output_attentions,
             )
 
