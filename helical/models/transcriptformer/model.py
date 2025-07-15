@@ -161,9 +161,11 @@ class TranscriptFormer(HelicalRNAModel):
             )
 
         mode = "training" if self.model.training else "eval"
+        if mode == "eval":
+            self.model.to(self.config.model.inference_config.device)
         logger.info(
             f"TranscriptFormer '{configurer.model_name}' model is in '{mode}' mode, "
-            f"on device GPU generating embeddings for '{self.model.inference_config.output_keys}' & {self.model.emb_mode} embeddings."
+            f"on device {self.model.device} generating embeddings for '{self.model.inference_config.output_keys}' & {self.model.emb_mode} embeddings."
         )
 
     def process_data(self, data_files: list[str] | list[anndata.AnnData]):
@@ -233,10 +235,11 @@ class TranscriptFormer(HelicalRNAModel):
             total=len(dataloader),
             unit="batch",
         )
-
+        logger.info(f"Using device: {self.config.model.inference_config.device}")
         self.model.to(self.config.model.inference_config.device)
         with torch.no_grad():
             for batch in progress_bar:
+                batch = batch.to(self.config.model.inference_config.device)
                 output_batch = self.model.inference(batch, output_attentions=output_attentions)
                 output.append(output_batch)
 
