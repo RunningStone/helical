@@ -116,7 +116,7 @@ class MultiHeadSelfFlexAttn(nn.Module):
 
     def _compute_attention_weights(self, q, k, score_mod=None, block_mask=None):
         """
-        计算注意力权重矩阵
+        计算注意力权重矩阵（完全向量化版本）
         这个方法手动计算注意力权重，用于可视化
         """
         batch_size, num_heads, seq_len, head_dim = q.shape
@@ -126,18 +126,26 @@ class MultiHeadSelfFlexAttn(nn.Module):
         
         # 应用 score_mod 函数（如果提供）
         if score_mod is not None:
-            # 创建索引网格
-            q_idx = torch.arange(seq_len, device=q.device)
-            kv_idx = torch.arange(seq_len, device=k.device)
+            # 创建索引网格 - 向量化创建所有索引对
+            q_idx = torch.arange(seq_len, device=q.device).unsqueeze(1)  # [seq_len, 1]
+            kv_idx = torch.arange(seq_len, device=k.device).unsqueeze(0)  # [1, seq_len]
             
-            # 对每个位置应用 score_mod
-            for b in range(batch_size):
-                for h in range(num_heads):
-                    for i in range(seq_len):
-                        for j in range(seq_len):
-                            scores[b, h, i, j] = score_mod(
-                                scores[b, h, i, j], b, h, i, j
-                            )
+            # 广播创建完整的索引矩阵
+            q_idx_grid = q_idx.expand(seq_len, seq_len)  # [seq_len, seq_len]
+            kv_idx_grid = kv_idx.expand(seq_len, seq_len)  # [seq_len, seq_len]
+            
+            # 创建batch和head的索引网格
+            b_idx = torch.arange(batch_size, device=q.device).view(batch_size, 1, 1, 1)
+            h_idx = torch.arange(num_heads, device=q.device).view(1, num_heads, 1, 1)
+            
+            # 扩展索引到完整维度 [batch_size, num_heads, seq_len, seq_len]
+            b_idx_full = b_idx.expand(batch_size, num_heads, seq_len, seq_len)
+            h_idx_full = h_idx.expand(batch_size, num_heads, seq_len, seq_len)
+            q_idx_full = q_idx_grid.unsqueeze(0).unsqueeze(0).expand(batch_size, num_heads, seq_len, seq_len)
+            kv_idx_full = kv_idx_grid.unsqueeze(0).unsqueeze(0).expand(batch_size, num_heads, seq_len, seq_len)
+            
+            # 完全向量化调用score_mod，一次处理所有位置
+            scores = score_mod(scores, b_idx_full, h_idx_full, q_idx_full, kv_idx_full)
         
         # 应用 block_mask（如果提供）
         if block_mask is not None:
@@ -318,16 +326,12 @@ class TranscriptEncoder(nn.Module):
         for i,mod in enumerate(self.encoder_layers):
             if output_attentions and (i==len(self.encoder_layers)-1):
                 # only take last layer attention map with time costs in seconds
-                print(f"[PAN]::Taking last layer attention map at {time.time()}")
-                start_time = time.time()
                 output, attn_map = mod(
                     output,
                     score_mod=score_mod,
                     block_mask=block_mask,
                     output_attentions=True,
                 )
-                end_time = time.time()
-                print(f"[PAN]::Last layer attention map shape: {attn_map.shape}, time: {(end_time-start_time)*1000}ms")
                 attn_maps.append(attn_map)
             else:
                 output = mod(
