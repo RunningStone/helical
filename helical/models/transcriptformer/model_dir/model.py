@@ -331,6 +331,7 @@ class Transcriptformer(nn.Module):
             KV_LEN=right_shifted_gene_embeddings.shape[1],
             BLOCK_SIZE=self.model_config.block_len,
             _compile=True,
+            device=device,
         )
 
         # Score mode
