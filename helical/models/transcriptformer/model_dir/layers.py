@@ -1,5 +1,5 @@
 import copy
-
+import time
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -315,14 +315,19 @@ class TranscriptEncoder(nn.Module):
         output = x
         attn_maps = []
         
-        for mod in self.encoder_layers:
-            if output_attentions:
+        for i,mod in enumerate(self.encoder_layers):
+            if output_attentions and (i==len(self.encoder_layers)-1):
+                # only take last layer attention map with time costs in seconds
+                print(f"[PAN]::Taking last layer attention map at {time.time()}")
+                start_time = time.time()
                 output, attn_map = mod(
                     output,
                     score_mod=score_mod,
                     block_mask=block_mask,
                     output_attentions=True,
                 )
+                end_time = time.time()
+                print(f"[PAN]::Last layer attention map shape: {attn_map.shape}, time: {(end_time-start_time)*1000}ms")
                 attn_maps.append(attn_map)
             else:
                 output = mod(
@@ -331,7 +336,6 @@ class TranscriptEncoder(nn.Module):
                     block_mask=block_mask,
                     output_attentions=False,
                 )
-                attn_maps=None
         
         return output, attn_maps
 
