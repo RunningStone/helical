@@ -237,10 +237,12 @@ class TranscriptFormer(HelicalRNAModel):
         self.model.to(self.config.model.inference_config.device)
         # 检查模型参数的设备
         for name, param in self.model.named_parameters():
-            print(f"{name}: {param.device}")
+            logger.info(f"{name}: {param.device}")
+        logger.info(f"Using device check done")
         with torch.no_grad():
             for batch in progress_bar:
                 batch = batch.to(self.config.model.inference_config.device)
+                logger.info(f"Batch device: {batch.device}")
                 output_batch = self.model.inference(batch, output_attentions=output_attentions)
                 output.append(output_batch)
 
