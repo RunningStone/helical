@@ -229,7 +229,20 @@ class TranscriptFormer(HelicalRNAModel):
         logger.info(f"Using device: {self.config.model.inference_config.device}")
         self.model.to(self.config.model.inference_config.device)
         
+        # Add function to extract gene names from batch
+        def extract_gene_names_from_batch(batch, reverse_gene_vocab):
+            """从批次中提取基因名称"""
+            batch_gene_names = []
+            for sample_idx in range(batch.gene_token_indices.shape[0]):
+                sample_gene_tokens = batch.gene_token_indices[sample_idx]
+                sample_gene_names = [ reverse_gene_vocab.get(int(token), f"UNKNOWN_{int(token)}") for token in sample_gene_tokens ]
+                batch_gene_names.append(sample_gene_names)
+            return batch_gene_names
+        # 创建反向基因词汇表映射
+        reverse_gene_vocab = {v: k for k, v in dataset.gene_vocab.items()}
+
         output = []
+        gene_names_list = []
         progress_bar = tqdm(
             dataloader,
             desc="Embedding Cells",
@@ -239,7 +252,14 @@ class TranscriptFormer(HelicalRNAModel):
 
         with torch.no_grad():
             for batch in progress_bar:
+                # Model inference
                 output_batch = self.model.inference(batch, output_attentions=output_attentions)
+
+                if output_attentions:
+                    # 提取基因名称
+                    batch_gene_names = extract_gene_names_from_batch(batch, reverse_gene_vocab)
+                    gene_names_list.extend(batch_gene_names)
+                    output_batch['gene_names'] = batch_gene_names
                 output.append(output_batch)
 
         logger.info("Combining predictions")
@@ -268,7 +288,10 @@ class TranscriptFormer(HelicalRNAModel):
 
         logger.info(f"Returning '{self.model.emb_mode}_embeddings' from output.")
         embeddings = concat_output[self.model.emb_mode + "_embeddings"]
-        return embeddings
+        if output_attentions:
+            return embeddings, concat_output["attn_maps"], concat_output["gene_names"]
+        else:
+            return embeddings
 
     def get_output_adata(self) -> anndata.AnnData:
         """
