@@ -226,6 +226,7 @@ class TranscriptFormer(HelicalRNAModel):
             pin_memory=True,
             collate_fn=dataset.collate_fn,
         )
+        logger.info(f"Using batch size: {self.model.inference_config.batch_size}")
         logger.info(f"Using device: {self.config.model.inference_config.device}")
         self.model.to(self.config.model.inference_config.device)
         
